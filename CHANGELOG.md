@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0
+
+- Pressing a button on the mouse selects it on the Buttons tab, so you can find it without knowing its name. This needs no new permissions, and the mouse is only read while that tab is open.
+
 ## 0.4.0
 
 - Add profiles: save, load and delete whole configurations from the new Profiles tab or with `rival5 profile`.

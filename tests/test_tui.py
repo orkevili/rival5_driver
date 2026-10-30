@@ -351,3 +351,142 @@ async def test_ctrl_s_does_nothing_behind_a_dialog(mouse):
         await pilot.press("ctrl+s")
         await settle(app, pilot)
         assert not config.default_path().exists()
+
+
+class FakeWatch:
+    def __init__(self, callback):
+        self.callback = callback
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def make_watched_app(mouse, watches):
+    def watcher(callback):
+        watches.append(FakeWatch(callback))
+        return watches[-1]
+
+    return Rival5App(
+        opener=lambda: mouse, status=lambda: device.CONNECTED, watcher=watcher
+    )
+
+
+def highlighted_button(app):
+    buttons = app.query_one("#buttons")
+    return buttons.get_option_at_index(buttons.highlighted).id
+
+
+async def test_mouse_press_selects_its_button(mouse):
+    watches = []
+    app = make_watched_app(mouse, watches)
+    async with app.run_test(size=(90, 30)) as pilot:
+        await pilot.press("right", "right")
+        watches[-1].callback("button4")
+        await pilot.pause()
+        assert highlighted_button(app) == "button4"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, ButtonPicker)
+        assert app.screen.button == "button4"
+
+
+@pytest.mark.parametrize("action", ["F13", "f13"])
+async def test_mouse_press_finds_a_rebound_button(mouse, action):
+    config.save(Config(buttons={"button5": action}))
+    watches = []
+    app = make_watched_app(mouse, watches)
+    async with app.run_test(size=(90, 30)) as pilot:
+        await pilot.press("right", "right")
+        watches[-1].callback("F13")
+        await pilot.pause()
+        assert highlighted_button(app) == "button5"
+
+
+async def test_mouse_press_finds_an_alias(mouse):
+    config.save(Config(buttons={"button5": "vol+"}))
+    watches = []
+    app = make_watched_app(mouse, watches)
+    async with app.run_test(size=(90, 30)) as pilot:
+        await pilot.press("right", "right")
+        watches[-1].callback("VolumeUp")
+        await pilot.pause()
+        assert highlighted_button(app) == "button5"
+
+
+async def test_mouse_press_uses_saved_bindings(mouse):
+    watches = []
+    app = make_watched_app(mouse, watches)
+    async with app.run_test(size=(90, 30)) as pilot:
+        await pilot.press("right", "right")
+        app._bind("button4", "F13")
+        watches[-1].callback("F13")
+        await pilot.pause()
+        assert highlighted_button(app) == "button1"
+        watches[-1].callback("button4")
+        await pilot.pause()
+        assert highlighted_button(app) == "button4"
+
+
+async def test_mouse_press_ignored_behind_a_dialog(mouse):
+    watches = []
+    app = make_watched_app(mouse, watches)
+    async with app.run_test(size=(90, 30)) as pilot:
+        await pilot.press("right", "right", "enter")
+        await pilot.pause()
+        watches[-1].callback("button4")
+        await pilot.pause()
+        assert highlighted_button(app) == "button1"
+
+
+async def test_watch_only_runs_on_the_buttons_tab(mouse):
+    watches = []
+    app = make_watched_app(mouse, watches)
+    async with app.run_test(size=(90, 30)) as pilot:
+        assert watches == []
+        await pilot.press("right", "right")
+        await pilot.pause()
+        assert app.watch is watches[-1]
+        assert "Press a mouse button" in str(app.query_one("#buttons-hint").render())
+        await pilot.press("right")
+        await pilot.pause()
+        assert watches[-1].closed
+        assert app.watch is None
+
+
+async def test_watch_closes_on_exit(mouse):
+    watches = []
+    app = make_watched_app(mouse, watches)
+    async with app.run_test(size=(90, 30)) as pilot:
+        await pilot.press("right", "right")
+        await pilot.pause()
+    assert watches[-1].closed
+
+
+async def test_watch_restarts_after_a_replug(mouse):
+    watches = []
+    app = make_watched_app(mouse, watches)
+    async with app.run_test(size=(90, 30)) as pilot:
+        await pilot.press("right", "right")
+        await pilot.pause()
+        first = watches[-1]
+        first.closed = True
+        app.refresh_status()
+        assert app.watch is watches[-1]
+        assert app.watch is not first
+
+
+async def test_buttons_tab_works_without_a_watch(mouse):
+    def unavailable(callback):
+        raise OSError("no access")
+
+    app = Rival5App(
+        opener=lambda: mouse, status=lambda: device.CONNECTED, watcher=unavailable
+    )
+    async with app.run_test(size=(90, 30)) as pilot:
+        await pilot.press("right", "right")
+        await pilot.pause()
+        assert app.watch is None
+        hint = str(app.query_one("#buttons-hint").render())
+        assert "Press a mouse button" not in hint
+        assert app.focused.id == "buttons"

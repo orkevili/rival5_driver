@@ -33,6 +33,7 @@ Run `rival5` to open the TUI.
 | `Enter` | Edit the selected item |
 | `p` | On the Lighting tab: pick a color for the selected zone |
 | `+` `-` `a` `d` | On the CPI tab: step, add, remove |
+| Any mouse button | On the Buttons tab: select that button |
 | `s` | Save to the config and the mouse |
 | `Ctrl+S` | Save, also from inside a text field |
 | `q` | Quit |
@@ -42,6 +43,8 @@ Colors can be hex (`#00aaff`, `0af`), CSS names (`orange`, `hotpink`), `rgb(0,17
 In the color picker, use the mouse or the arrow keys, change the hue with `,` and `.`, then press `Enter` to use the color or `Esc` to go back. The `Pick…` button next to Reactive opens it for the reactive color. Screens and LEDs differ, so pale and mixed colors look paler on the mouse than in the picker.
 
 Colors change on the mouse as you pick them, as a preview. Pressing `Enter` on a reactive color also sends it, and it shows on the next click. Everything else waits for `s`, and tabs with unsaved changes show `●`. If you quit and discard, the saved colors and reactive color are put back.
+
+On the Buttons tab, pressing a button on the mouse selects its row, so `Enter` edits it straight away. The mouse is only read while this tab is open, and nothing is stored.
 
 The same settings are available as commands:
 
@@ -112,6 +115,7 @@ Not yet confirmed on the hardware, apart from the defaults in the device profile
 - **Keys are physical QWERTY positions.** On a Hungarian layout `z` and `y` are swapped, and some symbols differ.
 - **One key per button.** Combinations such as Ctrl+C can't be bound.
 - **`button7` to `button9` can't be used as actions**, because their ID in the device profile means "disabled". They can still be bound to something else.
+- **Finding a pressed button depends on its binding.** The mouse reports what a button does, not which button it is. A `disabled` button sends nothing, which is the default for `button6` to `button8`, so bind one to something first to find it. If two buttons share an action, the first is selected. Unsaved bindings don't count until you save, because they aren't on the mouse yet.
 - **Setting CPI selects the first preset.** The restore service never sends CPI, so this only happens when you change it.
 
 ## Development

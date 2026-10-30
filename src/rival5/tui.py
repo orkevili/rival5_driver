@@ -23,7 +23,7 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from . import __version__, config, device
+from . import __version__, buttonwatch, config, device
 from .colorpicker import ColorPicker
 
 TABS = ["lighting", "cpi", "buttons", "device", "profiles"]
@@ -64,6 +64,8 @@ ZONE_LABELS = {
     "z9": "Right bottom",
 }
 MOUSE_ERRORS = (device.DeviceError, OSError, ValueError)
+BUTTONS_HINT = "Enter changes the selected button"
+BUTTONS_WATCH_HINT = f"Press a mouse button to find it. {BUTTONS_HINT}"
 HINT = "←/→ tabs   ↑/↓ move   tab next field   enter edit   ctrl+s save"
 SWATCHES = [
     "red",
@@ -204,10 +206,12 @@ class Rival5App(App):
         Binding("q", "quit", "Quit"),
     ]
 
-    def __init__(self, opener=None, status=None):
+    def __init__(self, opener=None, status=None, watcher=None):
         super().__init__()
         self.opener = opener or device.open_mouse
         self.read_status = status or device.status
+        self.watcher = watcher or buttonwatch.ButtonWatch
+        self.watch = None
         self.saved = None
         self.cfg = None
         self.load_error = None
@@ -282,7 +286,7 @@ class Rival5App(App):
                         yield Button("Remove", id="cpi-remove")
             with TabPane("Buttons", id="buttons-tab"):
                 with Vertical():
-                    yield Label("Enter changes the selected button")
+                    yield Label(BUTTONS_HINT, id="buttons-hint")
                     yield OptionList(id="buttons")
             with TabPane("Device", id="device-tab"):
                 with Vertical():
@@ -323,6 +327,7 @@ class Rival5App(App):
         status = self.query_one("#status", Static)
         status.update(f"{mark} {state}")
         status.set_class(state == device.CONNECTED, "ok")
+        self._sync_watch()
 
     def refresh_all(self):
         self.refresh_zones()
@@ -418,6 +423,7 @@ class Rival5App(App):
         if name == "profiles":
             self.refresh_profiles()
         self.query_one(TAB_FOCUS[name]).focus()
+        self._sync_watch()
 
     def check_action(self, action, parameters):
         if action == "pick":
@@ -691,6 +697,38 @@ class Rival5App(App):
         self.push_screen(
             ButtonPicker(button), lambda action: self._bind(button, action)
         )
+
+    def _sync_watch(self):
+        """Watch the mouse on the Buttons tab only, and recover from a replug."""
+        active = self.query_one("#tabs", TabbedContent).active == "buttons-tab"
+        if self.watch and (self.watch.closed or not active):
+            self._stop_watch()
+        if active and not self.watch:
+            try:
+                self.watch = self.watcher(self._button_pressed_on_mouse)
+            except OSError:
+                pass
+        hint = BUTTONS_WATCH_HINT if self.watch else BUTTONS_HINT
+        self.query_one("#buttons-hint", Label).update(hint)
+
+    def _stop_watch(self):
+        if self.watch:
+            self.watch.close()
+            self.watch = None
+
+    def on_unmount(self):
+        self._stop_watch()
+
+    def _button_pressed_on_mouse(self, action):
+        if isinstance(self.screen, ModalScreen):
+            return
+        # Unsaved bindings aren't on the mouse yet, so go by the saved ones.
+        bindings = {**config.BUTTON_DEFAULTS, **self.saved.buttons}
+        for button, bound in bindings.items():
+            if buttonwatch.canonical(bound) == action:
+                buttons = self.query_one("#buttons", OptionList)
+                buttons.highlighted = buttons.get_option_index(button)
+                return
 
     def _bind(self, button, action):
         if action is None:

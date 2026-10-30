@@ -68,6 +68,21 @@ rival5 --no-save bind button4=a
 
 The config is `~/.config/rival5/config.toml`. See [config.example.toml](config.example.toml) for the format. The TUI and commands rewrite this file, so comments you add aren't kept.
 
+## Profiles
+
+A profile is a saved copy of all your settings. Use the Profiles tab, or:
+
+```sh
+rival5 profile save gaming        # add --force to overwrite
+rival5 profile load gaming        # switch to it
+rival5 profile list               # * marks the one in use
+rival5 profile delete gaming
+```
+
+Profiles are files in `~/.config/rival5/profiles/`, because the mouse only holds one configuration. Loading one writes it to the mouse and makes it your config, so it survives a replug. A factory reset leaves profiles alone.
+
+Saving a profile includes changes you haven't saved yet, and doesn't change the mouse. LEDs a profile doesn't set return to the mouse's default color when it loads.
+
 ## Bindings
 
 A button can be bound to:

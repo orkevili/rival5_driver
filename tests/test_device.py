@@ -135,3 +135,22 @@ def test_send_lighting_skips_leds_already_showing_the_color(mouse):
 
 def test_rainbow_means_nothing_can_be_skipped(mouse):
     assert device.send_lighting(mouse, Config(rainbow=True)) is None
+
+
+def test_lighting_waits_for_the_flash_write_after_a_save(mouse, monkeypatch):
+    monkeypatch.setattr(device, "SAVE_PAUSE", 0.3)
+    monkeypatch.setattr(
+        device.time, "sleep", lambda seconds: mouse.calls.append(("sleep", seconds))
+    )
+    device.apply(mouse, Config(zones={"wheel": "red"}))
+    names = mouse.names()
+    assert names.index("save") < names.index("sleep") < names.index("set_wheel_color")
+    assert ("sleep", 0.3) in mouse.calls
+
+
+def test_no_pause_without_a_save(mouse, monkeypatch):
+    monkeypatch.setattr(
+        device.time, "sleep", lambda seconds: mouse.calls.append(("sleep", seconds))
+    )
+    device.apply(mouse, Config(zones={"wheel": "red"}), save=False)
+    assert "sleep" not in mouse.names()

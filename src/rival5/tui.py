@@ -26,24 +26,27 @@ from textual.widgets.option_list import Option
 from . import __version__, config, device
 from .colorpicker import ColorPicker
 
-TABS = ["lighting", "cpi", "buttons", "device"]
+TABS = ["lighting", "cpi", "buttons", "device", "profiles"]
 TAB_LABELS = {
     "lighting": "Lighting",
     "cpi": "CPI",
     "buttons": "Buttons",
     "device": "Device",
+    "profiles": "Profiles",
 }
 TAB_FIELDS = {
     "lighting": ("zones", "rainbow", "brightness", "reactive", "startup"),
     "cpi": ("sensitivity",),
     "buttons": ("buttons",),
     "device": ("polling",),
+    "profiles": (),
 }
 TAB_FOCUS = {
     "lighting": "#zones",
     "cpi": "#cpi",
     "buttons": "#buttons",
     "device": "#polling",
+    "profiles": "#profiles",
 }
 ZONE_LABELS = {
     "all": "All",
@@ -294,6 +297,15 @@ class Rival5App(App):
                     with Horizontal(classes="row"):
                         yield Button("Send all to mouse", id="apply-all")
                         yield Button("Factory reset", id="reset", variant="error")
+            with TabPane("Profiles", id="profiles-tab"):
+                with Vertical():
+                    yield Label("Saved configurations. Enter loads the selected one")
+                    yield OptionList(id="profiles")
+                    with Horizontal(id="profile-row", classes="row"):
+                        yield Input(placeholder="Profile name", id="profile-name")
+                        yield Button("Load", id="profile-load")
+                        yield Button("Save current", id="profile-save")
+                        yield Button("Delete", id="profile-delete")
         yield Static("", id="pending")
         yield Footer()
 
@@ -316,6 +328,7 @@ class Rival5App(App):
         self.refresh_zones()
         self.refresh_cpi()
         self.refresh_buttons()
+        self.refresh_profiles()
         self.refresh_pending()
         self.query_one("#brightness", Select).value = self.cfg.brightness
         self.query_one("#startup", Select).value = self.cfg.startup
@@ -365,7 +378,8 @@ class Rival5App(App):
         position = widget.highlighted or 0
         widget.clear_options()
         widget.add_options(options)
-        widget.highlighted = min(position, widget.option_count - 1)
+        if options:
+            widget.highlighted = min(position, widget.option_count - 1)
 
     def refresh_cpi(self):
         self._fill(
@@ -382,17 +396,27 @@ class Rival5App(App):
             rows.append(Option(Text(f"{marker} {button:<12}{action}"), id=button))
         self._fill(self.query_one("#buttons", OptionList), rows)
 
+    def refresh_profiles(self):
+        active = config.active_profile(self.saved)
+        rows = []
+        for name in config.list_profiles():
+            marker = "●" if name == active else " "
+            rows.append(Option(Text(f"{marker} {name}"), id=name))
+        self._fill(self.query_one("#profiles", OptionList), rows)
+
     # Actions
 
     def action_tab(self, offset):
         tabs = self.query_one("#tabs", TabbedContent)
-        panes = ["lighting", "cpi-tab", "buttons-tab", "device-tab"]
+        panes = ["lighting", "cpi-tab", "buttons-tab", "device-tab", "profiles-tab"]
         index = panes.index(tabs.active)
         tabs.active = panes[(index + offset) % len(panes)]
 
     @on(TabbedContent.TabActivated, "#tabs")
     def _focus_tab(self, event):
         name = event.pane.id.removesuffix("-tab")
+        if name == "profiles":
+            self.refresh_profiles()
         self.query_one(TAB_FOCUS[name]).focus()
 
     def check_action(self, action, parameters):
@@ -409,7 +433,7 @@ class Rival5App(App):
             return
         self._save()
 
-    def _save(self, then_exit=False):
+    def _save(self, then_exit=False, send=device.apply, success="Saved to the mouse"):
         try:
             config.validate(self.cfg)
         except ValueError as error:
@@ -422,10 +446,11 @@ class Rival5App(App):
         self.saved = copy.deepcopy(cfg)
         self.mouse_reactive = cfg.reactive
         self.refresh_buttons()
+        self.refresh_profiles()
         self.refresh_pending()
         self._with_mouse(
-            lambda mouse: device.apply(mouse, cfg, previous=previous),
-            success="Saved to the mouse",
+            lambda mouse: send(mouse, cfg, previous),
+            success=success,
             failure="Saved to config, but the mouse wasn't updated",
             then_exit=then_exit,
         )
@@ -682,6 +707,85 @@ class Rival5App(App):
         self.refresh_buttons()
         self.refresh_pending()
 
+    # Profiles
+
+    def _selected_profile(self):
+        profiles = self.query_one("#profiles", OptionList)
+        if profiles.highlighted is None:
+            self.notify("Save a profile first", severity="warning")
+            return None
+        return profiles.get_option_at_index(profiles.highlighted).id
+
+    @on(OptionList.OptionHighlighted, "#profiles")
+    def _profile_highlighted(self, event):
+        self.query_one("#profile-name", Input).value = event.option.id
+
+    @on(OptionList.OptionSelected, "#profiles")
+    def _profile_selected(self, event):
+        self._ask_load_profile(event.option.id)
+
+    def _ask_load_profile(self, name):
+        if not self.dirty:
+            self._load_profile(name)
+            return
+        self.push_screen(
+            ConfirmScreen(
+                f"Load {name} and lose your unsaved changes?",
+                [("load", "Load"), ("cancel", "Cancel")],
+            ),
+            lambda choice: choice == "load" and self._load_profile(name),
+        )
+
+    def _load_profile(self, name):
+        try:
+            cfg = config.load_profile(name)
+            config.validate(cfg)
+        except ValueError as error:
+            self.notify(str(error), severity="error")
+            return
+        self.cfg = cfg
+        self.refresh_all()
+        self._save(send=device.send_profile, success=f"Loaded {name}")
+
+    def _ask_save_profile(self):
+        name = self.query_one("#profile-name", Input).value.strip()
+        try:
+            path = config.profile_path(name)
+            config.validate(self.cfg)
+        except ValueError as error:
+            self.notify(str(error), severity="error")
+            return
+        if not path.exists():
+            self._save_profile(name)
+            return
+        self.push_screen(
+            ConfirmScreen(
+                f"Overwrite {name}?",
+                [("overwrite", "Overwrite"), ("cancel", "Cancel")],
+            ),
+            lambda choice: choice == "overwrite" and self._save_profile(name),
+        )
+
+    def _save_profile(self, name):
+        config.save(self.cfg, config.profile_path(name))
+        self.refresh_profiles()
+        self.notify(f"Saved {name}")
+
+    def _ask_delete_profile(self):
+        name = self._selected_profile()
+        if name is None:
+            return
+        self.push_screen(
+            ConfirmScreen(
+                f"Delete {name}?", [("delete", "Delete"), ("cancel", "Cancel")]
+            ),
+            lambda choice: choice == "delete" and self._delete_profile(name),
+        )
+
+    def _delete_profile(self, name):
+        config.delete_profile(name)
+        self.refresh_profiles()
+
     # Button presses
 
     def on_button_pressed(self, event):
@@ -703,6 +807,13 @@ class Rival5App(App):
                 self._preview()
             case "apply-all":
                 self._apply_all()
+            case "profile-load":
+                if name := self._selected_profile():
+                    self._ask_load_profile(name)
+            case "profile-save":
+                self._ask_save_profile()
+            case "profile-delete":
+                self._ask_delete_profile()
             case "reset":
                 self.push_screen(
                     ConfirmScreen(

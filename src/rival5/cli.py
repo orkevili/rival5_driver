@@ -47,6 +47,18 @@ def _parser():
     command = commands.add_parser("apply", help="send the whole config")
     command.add_argument("--force", action="store_true", help="allow no left click")
 
+    command = commands.add_parser("profile", help="manage saved configurations")
+    actions = command.add_subparsers(dest="action", required=True)
+    actions.add_parser("list", help="list profiles, marking the active one")
+    action = actions.add_parser("save", help="save the config as a profile")
+    action.add_argument("name")
+    action.add_argument("--force", action="store_true", help="overwrite it")
+    action = actions.add_parser("load", help="switch to a profile")
+    action.add_argument("name")
+    action.add_argument("--force", action="store_true", help="allow no left click")
+    action = actions.add_parser("delete", help="delete a profile")
+    action.add_argument("name")
+
     commands.add_parser("restore", help="re-send lighting only (used by the service)")
     commands.add_parser("show", help="print the config")
     commands.add_parser("reset", help="factory defaults, clears the config")
@@ -127,6 +139,32 @@ def _apply(args):
         device.apply(mouse, cfg, save=not args.no_save)
 
 
+def _profile(args):
+    match args.action:
+        case "list":
+            active = config.active_profile(config.load())
+            for name in config.list_profiles():
+                print(f"{'*' if name == active else ' '} {name}")
+        case "save":
+            path = config.profile_path(args.name)
+            if path.exists() and not args.force:
+                raise ValueError(f"{args.name} exists. Use --force to overwrite it")
+            config.save(config.load(), path)
+        case "load":
+            cfg = config.load_profile(args.name)
+            config.validate(cfg, force=args.force)
+            exists = config.default_path().exists()
+            previous = config.load() if exists else None
+            with device.open_mouse() as mouse:
+                device.send_profile(mouse, cfg, previous, save=not args.no_save)
+            if not args.no_save:
+                config.save(cfg)
+        case "delete":
+            if not config.profile_path(args.name).exists():
+                raise ValueError(f"No profile named {args.name}")
+            config.delete_profile(args.name)
+
+
 def run(args):
     match args.command:
         case "color":
@@ -162,6 +200,8 @@ def run(args):
             _change(args, _unbind(args), device.send_buttons, args.force)
         case "apply":
             _apply(args)
+        case "profile":
+            _profile(args)
         case "restore":
             _restore()
         case "show":

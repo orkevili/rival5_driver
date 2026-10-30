@@ -110,6 +110,19 @@ OptionList:focus {
     height: auto;
 }
 
+#profiles {
+    height: 1fr;
+}
+
+#profile-name {
+    width: 22;
+    margin-right: 2;
+}
+
+#profile-row Button {
+    min-width: 10;
+}
+
 #lighting-grid Label, #device-grid Label {
     margin: 1 0 0 0;
 }

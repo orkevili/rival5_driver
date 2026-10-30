@@ -1,5 +1,7 @@
 import pytest
 
+from rival5 import device
+
 
 class FakeMouse:
     """Records every setter call, in order."""
@@ -38,3 +40,4 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("RIVALCFG_DRY", "1")
     monkeypatch.setenv("RIVALCFG_DEBUG_NO_COMMAND_DELAY", "1")
+    monkeypatch.setattr(device, "SAVE_PAUSE", 0)

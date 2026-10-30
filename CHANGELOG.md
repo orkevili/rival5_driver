@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0
+
+- Add profiles: save, load and delete whole configurations from the new Profiles tab or with `rival5 profile`.
+- Fix the wheel keeping its old color when colors are sent right after a save.
+
 ## 0.3.0
 
 - Add a color picker for zones and the reactive color, with mouse and keyboard control and a live preview.

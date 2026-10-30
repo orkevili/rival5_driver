@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,7 @@ REACTIVE_OFF = ("off", "disable")
 
 # Green LEDs are strong, so these names wash out when sent as their CSS values.
 LED_COLORS = {"orange": "#ff4500", "pink": "#ff2850"}
+DEFAULT_LED_COLOR = profile["settings"]["logo_color"]["default"]
 
 LEFT_STRIP = ["z2", "z4", "z6", "z8"]
 RIGHT_STRIP = ["z3", "z5", "z7", "z9"]
@@ -34,6 +36,7 @@ ZONES = {
     **{led: [led] for led in LEFT_STRIP + RIGHT_STRIP},
 }
 ZONE_ALIASES = {"z0": "wheel", "z1": "logo"}
+PROFILE_NAME = re.compile(r"\w[\w -]{0,31}")
 
 _BUTTONS = profile["settings"]["buttons_mapping"]["buttons"]
 BUTTON_DEFAULTS = {name.lower(): info["default"] for name, info in _BUTTONS.items()}
@@ -201,6 +204,46 @@ def load(path=None):
     except (ValueError, TypeError, AttributeError) as error:
         raise ValueError(f"{path}: {error}") from error
     return cfg
+
+
+def profiles_dir():
+    return default_path().parent / "profiles"
+
+
+def profile_path(name):
+    """Return the file for a profile. The name check also blocks other paths."""
+    name = name.strip()
+    if not PROFILE_NAME.fullmatch(name):
+        raise ValueError(
+            "Profile names are 1-32 letters, digits, spaces, - or _"
+        )
+    return profiles_dir() / f"{name}.toml"
+
+
+def list_profiles():
+    return sorted(path.stem for path in profiles_dir().glob("*.toml"))
+
+
+def load_profile(name):
+    path = profile_path(name)
+    if not path.exists():
+        raise ValueError(f"No profile named {name}")
+    return load(path)
+
+
+def delete_profile(name):
+    profile_path(name).unlink(missing_ok=True)
+
+
+def active_profile(cfg):
+    """Return the name of a profile equal to cfg, or None."""
+    for name in list_profiles():
+        try:
+            if load_profile(name) == cfg:
+                return name
+        except ValueError:
+            continue
+    return None
 
 
 def _table(name, values):

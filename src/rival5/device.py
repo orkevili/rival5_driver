@@ -1,6 +1,8 @@
 """Talk to the mouse through rivalcfg."""
 
 import os
+import time
+from dataclasses import replace
 from pathlib import Path
 
 from rivalcfg import usbhid
@@ -19,6 +21,10 @@ NO_PERMISSION = (
 CONNECTED, MISSING, FORBIDDEN = "connected", "not connected", "no permission"
 
 _LED_SETTINGS = {"z0": "wheel_color", "z1": "logo_color"}
+
+# The mouse misses a command sent while it writes to flash. Without this pause
+# the first LED after a save, the wheel, keeps its old color.
+SAVE_PAUSE = 0.3
 
 
 class DeviceError(Exception):
@@ -70,6 +76,11 @@ def send_buttons(mouse, cfg):
     mouse.set_buttons_mapping({"buttons": dict(cfg.buttons)})
 
 
+def _set_led(mouse, led, color):
+    setting = _LED_SETTINGS.get(led, f"{led}_color")
+    getattr(mouse, f"set_{setting}")(color)
+
+
 def send_lighting(mouse, cfg, last_sent=None):
     """Send the colors, skipping LEDs that already show them.
 
@@ -83,8 +94,7 @@ def send_lighting(mouse, cfg, last_sent=None):
     for led, color in config.resolve_zones(cfg.zones).items():
         color = config.led_hex(color)
         if showing.get(led) != color:
-            setting = _LED_SETTINGS.get(led, f"{led}_color")
-            getattr(mouse, f"set_{setting}")(color)
+            _set_led(mouse, led, color)
             showing[led] = color
     return showing
 
@@ -122,7 +132,23 @@ def apply(mouse, cfg, previous=None, save=True):
     if save:
         mouse.save()
     if changed("zones", "rainbow"):
+        if save:
+            time.sleep(SAVE_PAUSE)
         send_lighting(mouse, cfg)
+
+
+def send_profile(mouse, cfg, previous=None, save=True):
+    """Switch to a saved profile.
+
+    Colors always go, since a preview may have left others showing. LEDs the
+    profile doesn't cover return to the default, or the last profile's stay.
+    """
+    apply(mouse, cfg, previous and replace(previous, zones=None), save)
+    if not cfg.rainbow:
+        covered = config.resolve_zones(cfg.zones)
+        for led in config.LEDS:
+            if led not in covered:
+                _set_led(mouse, led, config.DEFAULT_LED_COLOR)
 
 
 def restore(mouse, cfg):

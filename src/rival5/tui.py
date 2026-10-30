@@ -1,0 +1,611 @@
+"""The terminal UI. Only colors reach the mouse before you press save."""
+
+import copy
+import threading
+
+from rich.text import Text
+from textual import on
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Grid, Horizontal, Vertical
+from textual.screen import ModalScreen
+from textual.widgets import (
+    Button,
+    Footer,
+    Input,
+    Label,
+    OptionList,
+    Select,
+    Static,
+    TabbedContent,
+    TabPane,
+)
+from textual.widgets.option_list import Option
+
+from . import config, device
+
+TABS = ["lighting", "cpi", "buttons", "device"]
+TAB_LABELS = {
+    "lighting": "Lighting",
+    "cpi": "CPI",
+    "buttons": "Buttons",
+    "device": "Device",
+}
+TAB_FIELDS = {
+    "lighting": ("zones", "rainbow", "brightness", "reactive", "startup"),
+    "cpi": ("sensitivity",),
+    "buttons": ("buttons",),
+    "device": ("polling",),
+}
+TAB_FOCUS = {
+    "lighting": "#zones",
+    "cpi": "#cpi",
+    "buttons": "#buttons",
+    "device": "#polling",
+}
+ZONE_LABELS = {
+    "all": "All",
+    "logo": "Logo",
+    "wheel": "Wheel",
+    "left": "Left strip",
+    "right": "Right strip",
+    "z2": "Left top",
+    "z4": "Left upper middle",
+    "z6": "Left lower middle",
+    "z8": "Left bottom",
+    "z3": "Right top",
+    "z5": "Right upper middle",
+    "z7": "Right lower middle",
+    "z9": "Right bottom",
+}
+HINT = "←/→ tabs   ↑/↓ move   tab next field   enter edit"
+SWATCHES = ["red", "lime", "blue", "aqua", "fuchsia", "yellow", "white"]
+ACTION_GROUPS = [
+    ("mouse", config.MOUSE_ACTIONS),
+    ("special", config.SPECIAL_ACTIONS),
+    ("media", config.MEDIA_KEYS),
+    ("key", config.KEYBOARD_KEYS),
+]
+
+
+class ConfirmScreen(ModalScreen):
+    """Ask a question and return the id of the button pressed."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, question, choices):
+        super().__init__()
+        self.question = question
+        self.choices = choices
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(self.question)
+            with Horizontal(classes="dialog-buttons"):
+                for choice, label in self.choices:
+                    yield Button(label, id=choice)
+
+    def on_button_pressed(self, event):
+        self.dismiss(event.button.id)
+
+    def action_cancel(self):
+        self.dismiss(None)
+
+
+class ButtonPicker(ModalScreen):
+    """Pick an action for a button from a type-to-filter list."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, button):
+        super().__init__()
+        self.button = button
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog picker"):
+            yield Label(f"Bind {self.button}")
+            yield Input(placeholder="Type to filter", id="filter")
+            yield OptionList(id="actions")
+
+    def on_mount(self):
+        self._fill("")
+
+    def _fill(self, text):
+        actions = self.query_one("#actions", OptionList)
+        actions.clear_options()
+        needle = text.lower()
+        rows = [("default", "")]
+        rows += [
+            (action, kind)
+            for kind, group in ACTION_GROUPS
+            for action in group
+        ]
+        for action, kind in rows:
+            if needle in action.lower():
+                prompt = Text.assemble(f"{action:<16}", (kind, "dim"))
+                actions.add_option(Option(prompt, id=f"action-{action}"))
+        if actions.option_count:
+            actions.highlighted = 0
+
+    @on(Input.Changed, "#filter")
+    def _filter(self, event):
+        self._fill(event.value)
+
+    def on_key(self, event):
+        actions = self.query_one("#actions", OptionList)
+        if event.key == "down":
+            actions.action_cursor_down()
+            event.stop()
+        elif event.key == "up":
+            actions.action_cursor_up()
+            event.stop()
+
+    @on(Input.Submitted, "#filter")
+    def _submit(self):
+        actions = self.query_one("#actions", OptionList)
+        if actions.highlighted is not None:
+            self._choose(actions.get_option_at_index(actions.highlighted))
+
+    @on(OptionList.OptionSelected, "#actions")
+    def _selected(self, event):
+        self._choose(event.option)
+
+    def _choose(self, option):
+        self.dismiss(option.id.removeprefix("action-"))
+
+    def action_cancel(self):
+        self.dismiss(None)
+
+
+class CpiList(OptionList):
+    BINDINGS = [
+        Binding("plus,equals_sign", "step(1)", "+100"),
+        Binding("minus", "step(-1)", "-100"),
+        Binding("a", "add", "Add"),
+        Binding("d,delete", "remove", "Remove"),
+    ]
+
+    def action_step(self, direction):
+        self.app.cpi_step(direction)
+
+    def action_add(self):
+        self.app.cpi_add()
+
+    def action_remove(self):
+        self.app.cpi_remove()
+
+
+class Rival5App(App):
+    CSS_PATH = "tui.tcss"
+    TITLE = "Rival 5"
+    ENABLE_COMMAND_PALETTE = False
+    BINDINGS = [
+        Binding("left", "tab(-1)", "Prev tab", show=False),
+        Binding("right", "tab(1)", "Next tab", show=False),
+        Binding("s", "save", "Save"),
+        Binding("q", "quit", "Quit"),
+    ]
+
+    def __init__(self, opener=None, status=None):
+        super().__init__()
+        self.opener = opener or device.open_mouse
+        self.read_status = status or device.status
+        self.saved = None
+        self.cfg = None
+        self.load_error = None
+        self.io_lock = threading.Lock()
+        try:
+            self.saved = config.load()
+        except ValueError as error:
+            self.load_error = str(error)
+            self.saved = config.Config()
+        self.cfg = copy.deepcopy(self.saved)
+
+    @property
+    def dirty(self):
+        return self.cfg != self.saved
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(id="header"):
+            yield Static("Rival 5", id="title")
+            yield Static("", id="status")
+        with TabbedContent(initial="lighting", id="tabs"):
+            with TabPane("Lighting", id="lighting"):
+                with Horizontal():
+                    yield OptionList(id="zones")
+                    with Vertical(id="lighting-controls"):
+                        with Horizontal(id="color-row"):
+                            yield Input(placeholder="#00aaff or red", id="color")
+                            yield Button("Rainbow", id="rainbow")
+                        with Horizontal(id="swatches"):
+                            for name in SWATCHES:
+                                swatch = Button("", id=f"swatch-{name}", classes="swatch")
+                                swatch.styles.background = config.color_hex(name)
+                                yield swatch
+                        with Grid(id="lighting-grid"):
+                            yield Label("Brightness")
+                            yield Select(
+                                [(f"{v}%", v) for v in config.BRIGHTNESS_LEVELS],
+                                value=self.cfg.brightness,
+                                allow_blank=False,
+                                id="brightness",
+                            )
+                            yield Label("Reactive")
+                            yield Input(
+                                value=self.cfg.reactive,
+                                placeholder="off or a color",
+                                id="reactive",
+                            )
+                            yield Label("On startup")
+                            yield Select(
+                                [(mode, mode) for mode in config.STARTUP_MODES],
+                                value=self.cfg.startup,
+                                allow_blank=False,
+                                id="startup",
+                            )
+            with TabPane("CPI", id="cpi-tab"):
+                with Vertical():
+                    yield Label("Presets, cycled by the CPI button")
+                    yield CpiList(id="cpi")
+                    with Horizontal(classes="row"):
+                        yield Button("-100", id="cpi-down")
+                        yield Button("+100", id="cpi-up")
+                        yield Button("Add", id="cpi-add")
+                        yield Button("Remove", id="cpi-remove")
+            with TabPane("Buttons", id="buttons-tab"):
+                with Vertical():
+                    yield Label("Enter changes the selected button")
+                    yield OptionList(id="buttons")
+            with TabPane("Device", id="device-tab"):
+                with Vertical():
+                    with Grid(id="device-grid"):
+                        yield Label("Polling rate")
+                        yield Select(
+                            [(f"{v} Hz", v) for v in config.POLLING_RATES],
+                            value=self.cfg.polling,
+                            allow_blank=False,
+                            id="polling",
+                        )
+                    with Horizontal(classes="row"):
+                        yield Button("Send all to mouse", id="apply-all")
+                        yield Button("Factory reset", id="reset", variant="error")
+        yield Static("", id="pending")
+        yield Footer()
+
+    def on_mount(self):
+        self.refresh_all()
+        self.refresh_status()
+        self.set_interval(2, self.refresh_status)
+        self.query_one("#zones", OptionList).focus()
+        if self.load_error:
+            self.notify(self.load_error, severity="error", timeout=15)
+
+    def refresh_status(self):
+        state = self.read_status()
+        mark = "●" if state == device.CONNECTED else "○"
+        status = self.query_one("#status", Static)
+        status.update(f"{mark} {state}")
+        status.set_class(state == device.CONNECTED, "ok")
+
+    def refresh_all(self):
+        self.refresh_zones()
+        self.refresh_cpi()
+        self.refresh_buttons()
+        self.refresh_pending()
+        self.query_one("#brightness", Select).value = self.cfg.brightness
+        self.query_one("#startup", Select).value = self.cfg.startup
+        self.query_one("#polling", Select).value = self.cfg.polling
+        self.query_one("#reactive", Input).value = self.cfg.reactive
+
+    def refresh_pending(self):
+        tabs = self.query_one("#tabs", TabbedContent)
+        for name in TABS:
+            changed = any(
+                getattr(self.cfg, field) != getattr(self.saved, field)
+                for field in TAB_FIELDS[name]
+            )
+            pane = "lighting" if name == "lighting" else f"{name}-tab"
+            marker = " ●" if changed else ""
+            tabs.get_tab(pane).label = TAB_LABELS[name] + marker
+        pending = self.query_one("#pending", Static)
+        pending.update("Unsaved changes: press s to save" if self.dirty else HINT)
+        pending.set_class(self.dirty, "unsaved")
+
+    def _zone_color(self, zone):
+        if zone in self.cfg.zones:
+            return self.cfg.zones[zone]
+        if zone in config.LEDS:
+            return config.resolve_zones(self.cfg.zones).get(zone)
+        return None
+
+    def _zone_prompt(self, zone):
+        color = self._zone_color(zone)
+        style = f"on {config.color_hex(color)}" if color else ""
+        # Non-breaking, or an empty swatch loses its width and the rows misalign.
+        return Text.assemble(("\u00a0\u00a0", style), f" {ZONE_LABELS[zone]}")
+
+    def refresh_zones(self):
+        zones = self.query_one("#zones", OptionList)
+        if zones.option_count:
+            for zone in ZONE_LABELS:
+                zones.replace_option_prompt(zone, self._zone_prompt(zone))
+        else:
+            zones.add_options(
+                [Option(self._zone_prompt(zone), id=zone) for zone in ZONE_LABELS]
+            )
+            zones.highlighted = 0
+
+    def _fill(self, widget, options):
+        """Replace a list's rows, keeping the cursor where it was."""
+        position = widget.highlighted or 0
+        widget.clear_options()
+        widget.add_options(options)
+        widget.highlighted = min(position, widget.option_count - 1)
+
+    def refresh_cpi(self):
+        self._fill(
+            self.query_one("#cpi", OptionList),
+            [Option(Text(f"{cpi} CPI")) for cpi in self.cfg.sensitivity],
+        )
+
+    def refresh_buttons(self):
+        rows = []
+        for button, default in config.BUTTON_DEFAULTS.items():
+            action = self.cfg.buttons.get(button, default)
+            changed = self.cfg.buttons.get(button) != self.saved.buttons.get(button)
+            marker = "●" if changed else " "
+            rows.append(Option(Text(f"{marker} {button:<12}{action}"), id=button))
+        self._fill(self.query_one("#buttons", OptionList), rows)
+
+    # Actions
+
+    def action_tab(self, offset):
+        tabs = self.query_one("#tabs", TabbedContent)
+        panes = ["lighting", "cpi-tab", "buttons-tab", "device-tab"]
+        index = panes.index(tabs.active)
+        tabs.active = panes[(index + offset) % len(panes)]
+
+    @on(TabbedContent.TabActivated, "#tabs")
+    def _focus_tab(self, event):
+        name = event.pane.id.removesuffix("-tab")
+        self.query_one(TAB_FOCUS[name]).focus()
+
+    def action_save(self):
+        if not self.dirty:
+            self.notify("Nothing to save")
+            return
+        self._save()
+
+    def _save(self, then_exit=False):
+        try:
+            config.validate(self.cfg)
+        except ValueError as error:
+            self.notify(str(error), severity="error")
+            return
+        previous = self.saved
+        cfg = copy.deepcopy(self.cfg)
+        config.save(cfg)
+        self.saved = copy.deepcopy(cfg)
+        self.refresh_buttons()
+        self.refresh_pending()
+        self._with_mouse(
+            lambda mouse: device.apply(mouse, cfg, previous=previous),
+            success="Saved to the mouse",
+            failure="Saved to config, but the mouse wasn't updated",
+            then_exit=then_exit,
+        )
+
+    async def action_quit(self):
+        if not self.dirty:
+            self.exit()
+            return
+        self.push_screen(
+            ConfirmScreen(
+                "You have unsaved changes.",
+                [("save", "Save"), ("discard", "Discard"), ("cancel", "Cancel")],
+            ),
+            self._after_quit_prompt,
+        )
+
+    def _after_quit_prompt(self, choice):
+        if choice == "save":
+            self._save(then_exit=True)
+        elif choice == "discard":
+            self._discard()
+
+    def _discard(self):
+        changed = (self.cfg.zones, self.cfg.rainbow) != (
+            self.saved.zones,
+            self.saved.rainbow,
+        )
+        if not changed:
+            self.exit()
+            return
+        # Colors were previewed live, so put the saved ones back.
+        saved = copy.deepcopy(self.saved)
+        self._with_mouse(
+            lambda mouse: device.send_lighting(mouse, saved), then_exit=True
+        )
+
+    def _with_mouse(self, job, success=None, failure=None, then_exit=False):
+        """Run job in a thread: writes pause between commands."""
+
+        def run():
+            error = None
+            with self.io_lock:
+                try:
+                    with self.opener() as mouse:
+                        job(mouse)
+                except (device.DeviceError, OSError, ValueError) as caught:
+                    error = str(caught)
+            if error:
+                text = f"{failure}: {error}" if failure else error
+                self.call_from_thread(self.notify, text, severity="error")
+            elif success:
+                self.call_from_thread(self.notify, success)
+            if then_exit:
+                self.call_from_thread(self.exit)
+
+        self.run_worker(run, thread=True, exit_on_error=False)
+
+    def _preview(self):
+        cfg = copy.deepcopy(self.cfg)
+        self.refresh_zones()
+        self.refresh_pending()
+        self._with_mouse(lambda mouse: device.send_lighting(mouse, cfg))
+
+    # Lighting
+
+    def _selected_zone(self):
+        zones = self.query_one("#zones", OptionList)
+        return zones.get_option_at_index(zones.highlighted).id
+
+    def _set_color(self, color):
+        try:
+            config.set_zone(self.cfg, self._selected_zone(), color)
+        except ValueError as error:
+            self.notify(str(error), severity="error")
+            return
+        self.query_one("#color", Input).value = color
+        self._preview()
+
+    @on(OptionList.OptionHighlighted, "#zones")
+    def _zone_highlighted(self, event):
+        color = self._zone_color(event.option.id)
+        self.query_one("#color", Input).value = color or ""
+
+    @on(OptionList.OptionSelected, "#zones")
+    def _zone_selected(self):
+        self.query_one("#color", Input).focus()
+
+    @on(Input.Submitted, "#color")
+    def _color_submitted(self, event):
+        self._set_color(event.value.strip())
+
+    @on(Input.Submitted, "#reactive")
+    def _reactive_submitted(self, event):
+        value = event.value.strip()
+        previous = self.cfg.reactive
+        self.cfg.reactive = value
+        try:
+            config.validate(self.cfg, force=True)
+        except ValueError as error:
+            self.cfg.reactive = previous
+            self.notify(str(error), severity="error")
+            return
+        self.refresh_pending()
+
+    @on(Select.Changed, "#brightness")
+    def _brightness_changed(self, event):
+        self.cfg.brightness = event.value
+        self.refresh_pending()
+
+    @on(Select.Changed, "#startup")
+    def _startup_changed(self, event):
+        self.cfg.startup = event.value
+        self.refresh_pending()
+
+    @on(Select.Changed, "#polling")
+    def _polling_changed(self, event):
+        self.cfg.polling = event.value
+        self.refresh_pending()
+
+    # CPI
+
+    def _cpi_index(self):
+        return self.query_one("#cpi", OptionList).highlighted or 0
+
+    def _cpi_changed(self):
+        self.refresh_cpi()
+        self.refresh_pending()
+
+    def cpi_step(self, direction):
+        index = self._cpi_index()
+        value = self.cfg.sensitivity[index] + direction * config.CPI_STEP
+        if config.MIN_CPI <= value <= config.MAX_CPI:
+            self.cfg.sensitivity[index] = value
+            self._cpi_changed()
+
+    def cpi_add(self):
+        presets = self.cfg.sensitivity
+        if len(presets) >= config.MAX_PRESETS:
+            self.notify(f"The mouse holds {config.MAX_PRESETS} presets", severity="warning")
+            return
+        presets.append(min(presets[-1] + 400, config.MAX_CPI))
+        self._cpi_changed()
+
+    def cpi_remove(self):
+        presets = self.cfg.sensitivity
+        if len(presets) == 1:
+            self.notify("The mouse needs at least one preset", severity="warning")
+            return
+        presets.pop(self._cpi_index())
+        self._cpi_changed()
+
+    # Buttons
+
+    @on(OptionList.OptionSelected, "#buttons")
+    def _button_selected(self, event):
+        button = event.option.id
+        self.push_screen(
+            ButtonPicker(button), lambda action: self._bind(button, action)
+        )
+
+    def _bind(self, button, action):
+        if action is None:
+            return
+        candidate = copy.deepcopy(self.cfg)
+        config.bind(candidate, button, action)
+        if not config.has_left_click(candidate.buttons):
+            self.notify(
+                "That leaves no left click. Bind another button to button1 first.",
+                severity="error",
+            )
+            return
+        self.cfg = candidate
+        self.refresh_buttons()
+        self.refresh_pending()
+
+    # Button presses
+
+    def on_button_pressed(self, event):
+        match event.button.id:
+            case "cpi-up":
+                self.cpi_step(1)
+            case "cpi-down":
+                self.cpi_step(-1)
+            case "cpi-add":
+                self.cpi_add()
+            case "cpi-remove":
+                self.cpi_remove()
+            case "rainbow":
+                self.cfg.rainbow = True
+                self._preview()
+            case "apply-all":
+                self._apply_all()
+            case "reset":
+                self.push_screen(
+                    ConfirmScreen(
+                        "Reset the mouse to factory defaults and clear the config?",
+                        [("reset", "Reset"), ("cancel", "Cancel")],
+                    ),
+                    self._after_reset_prompt,
+                )
+            case name if name and name.startswith("swatch-"):
+                self._set_color(name.removeprefix("swatch-"))
+
+    def _apply_all(self):
+        cfg = copy.deepcopy(self.saved)
+        self._with_mouse(
+            lambda mouse: device.apply(mouse, cfg), success="Sent to the mouse"
+        )
+
+    def _after_reset_prompt(self, choice):
+        if choice != "reset":
+            return
+        config.default_path().unlink(missing_ok=True)
+        self.saved = config.Config()
+        self.cfg = config.Config()
+        self.refresh_all()
+        self._with_mouse(device.reset, success="Reset to factory defaults")
+

@@ -1,0 +1,135 @@
+#header {
+    height: 1;
+    padding: 0 2;
+    background: $panel;
+}
+
+#title {
+    width: 1fr;
+    text-style: bold;
+}
+
+#status {
+    width: auto;
+    color: $warning;
+}
+
+#status.ok {
+    color: $success;
+}
+
+#pending {
+    height: 1;
+    padding: 0 2;
+    color: $text-muted;
+}
+
+#pending.unsaved {
+    color: $warning;
+}
+
+TabbedContent {
+    height: 1fr;
+}
+
+TabPane {
+    padding: 1 2 0 2;
+}
+
+OptionList {
+    border: round $panel-lighten-2;
+    background: transparent;
+}
+
+OptionList:focus {
+    border: round $accent;
+}
+
+#zones {
+    width: 28;
+    height: 100%;
+}
+
+#lighting-controls {
+    padding-left: 3;
+    width: 1fr;
+    height: auto;
+}
+
+#color-row {
+    height: 3;
+}
+
+#color {
+    width: 24;
+    margin-right: 2;
+}
+
+#swatches {
+    height: 1;
+    margin: 1 0;
+}
+
+.swatch {
+    min-width: 4;
+    width: 4;
+    height: 1;
+    border: none;
+    margin-right: 1;
+    padding: 0;
+}
+
+.swatch:focus {
+    text-style: reverse;
+    border: none;
+}
+
+#lighting-grid, #device-grid {
+    grid-size: 2;
+    grid-columns: 14 26;
+    grid-rows: 3;
+    height: auto;
+}
+
+#lighting-grid Label, #device-grid Label {
+    margin: 1 0 0 0;
+}
+
+.row {
+    height: auto;
+    margin-top: 1;
+}
+
+.row Button {
+    margin-right: 2;
+}
+
+ConfirmScreen, ButtonPicker {
+    align: center middle;
+}
+
+.dialog {
+    width: 56;
+    height: auto;
+    padding: 1 2;
+    border: round $accent;
+    background: $surface;
+}
+
+.dialog-buttons {
+    height: auto;
+    align-horizontal: right;
+}
+
+.dialog-buttons Button {
+    margin-left: 2;
+}
+
+.picker {
+    width: 44;
+    height: 80%;
+}
+
+#actions {
+    height: 1fr;
+}

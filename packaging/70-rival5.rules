@@ -1,0 +1,9 @@
+# SteelSeries Rival 5 (183c) and Destiny Edition (183e).
+# The file name must sort before 73-seat-late.rules, which applies uaccess.
+#
+# The pip hidapi build uses libusb, so access to the USB node is what matters.
+# The restore service hangs off that node on purpose: opening the mouse detaches
+# interface 0, which removes and re-adds its hidraw node, so a hidraw trigger
+# would make every restore start another one.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1038", ATTR{idProduct}=="183c|183e", TAG+="uaccess", TAG+="systemd", ENV{SYSTEMD_USER_WANTS}+="rival5-restore.service"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1038", ATTRS{idProduct}=="183c|183e", TAG+="uaccess"

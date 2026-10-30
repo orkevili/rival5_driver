@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rival5"
+version = "0.1.0"
+description = "Configure a SteelSeries Rival 5 on Linux from a terminal UI"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["rivalcfg>=4.17,<5", "textual>=8,<9"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
+
+[project.scripts]
+rival5 = "rival5.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+rival5 = ["tui.tcss"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

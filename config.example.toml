@@ -1,0 +1,23 @@
+# ~/.config/rival5/config.toml
+# The TUI and commands rewrite this file, so comments here are not kept.
+# After editing it by hand, run: rival5 apply
+
+[sensitivity]
+presets = [400, 800, 1600]        # 1-5 values, 100-18000, steps of 100
+
+[polling]
+rate = 1000                       # 125, 250, 500 or 1000
+
+[lighting]
+brightness = 75                   # 0, 25, 50, 75 or 100
+startup = "off"                   # off or rainbow: what the mouse shows by itself
+reactive = "off"                  # off, or a color to flash on click
+rainbow = false                   # true ignores [lighting.zones]
+
+[lighting.zones]                  # all, left, right, logo, wheel, z2-z9
+all = "#00aaff"                   # narrower zones win over broader ones
+wheel = "red"
+
+[buttons]                         # only overrides: unlisted buttons keep defaults
+button4 = "F13"
+button5 = "PlayPause"

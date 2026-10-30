@@ -1,0 +1,11 @@
+[Unit]
+Description=Restore SteelSeries Rival 5 lighting
+
+[Service]
+Type=oneshot
+# Give the mouse a moment to finish starting after it is plugged in.
+ExecStartPre=/usr/bin/sleep 1
+ExecStart=%h/.local/bin/rival5 restore
+
+[Install]
+WantedBy=default.target

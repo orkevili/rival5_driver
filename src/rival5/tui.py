@@ -22,7 +22,7 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from . import config, device
+from . import __version__, config, device
 
 TABS = ["lighting", "cpi", "buttons", "device"]
 TAB_LABELS = {
@@ -58,8 +58,18 @@ ZONE_LABELS = {
     "z7": "Right lower middle",
     "z9": "Right bottom",
 }
-HINT = "←/→ tabs   ↑/↓ move   tab next field   enter edit"
-SWATCHES = ["red", "lime", "blue", "aqua", "fuchsia", "yellow", "white"]
+HINT = "←/→ tabs   ↑/↓ move   tab next field   enter edit   ctrl+s save"
+SWATCHES = [
+    "red",
+    "orange",
+    "yellow",
+    "lime",
+    "aqua",
+    "blue",
+    "fuchsia",
+    "pink",
+    "white",
+]
 ACTION_GROUPS = [
     ("mouse", config.MOUSE_ACTIONS),
     ("special", config.SPECIAL_ACTIONS),
@@ -183,6 +193,7 @@ class Rival5App(App):
         Binding("left", "tab(-1)", "Prev tab", show=False),
         Binding("right", "tab(1)", "Next tab", show=False),
         Binding("s", "save", "Save"),
+        Binding("ctrl+s", "save", "Save", show=False, priority=True),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -207,7 +218,7 @@ class Rival5App(App):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="header"):
-            yield Static("Rival 5", id="title")
+            yield Static(f"Rival 5 v{__version__}", id="title")
             yield Static("", id="status")
         with TabbedContent(initial="lighting", id="tabs"):
             with TabPane("Lighting", id="lighting"):
@@ -308,7 +319,7 @@ class Rival5App(App):
             marker = " ●" if changed else ""
             tabs.get_tab(pane).label = TAB_LABELS[name] + marker
         pending = self.query_one("#pending", Static)
-        pending.update("Unsaved changes: press s to save" if self.dirty else HINT)
+        pending.update("Unsaved changes: press s or ctrl+s to save" if self.dirty else HINT)
         pending.set_class(self.dirty, "unsaved")
 
     def _zone_color(self, zone):
@@ -371,6 +382,9 @@ class Rival5App(App):
         self.query_one(TAB_FOCUS[name]).focus()
 
     def action_save(self):
+        # Ctrl+S is a priority binding, so it also fires behind a dialog.
+        if isinstance(self.screen, ModalScreen):
+            return
         if not self.dirty:
             self.notify("Nothing to save")
             return
@@ -482,18 +496,26 @@ class Rival5App(App):
     def _color_submitted(self, event):
         self._set_color(event.value.strip())
 
-    @on(Input.Submitted, "#reactive")
-    def _reactive_submitted(self, event):
-        value = event.value.strip()
-        previous = self.cfg.reactive
-        self.cfg.reactive = value
+    def _commit_reactive(self, value, report):
+        value = value.strip()
         try:
-            config.validate(self.cfg, force=True)
+            config.check_reactive(value)
         except ValueError as error:
-            self.cfg.reactive = previous
-            self.notify(str(error), severity="error")
+            if report:
+                self.notify(str(error), severity="error")
             return
+        self.cfg.reactive = value
         self.refresh_pending()
+
+    @on(Input.Changed, "#reactive")
+    def _reactive_changed(self, event):
+        # Half-typed values are normal here, so stay quiet about them.
+        self._commit_reactive(event.value, report=False)
+
+    @on(Input.Blurred, "#reactive")
+    @on(Input.Submitted, "#reactive")
+    def _reactive_finished(self, event):
+        self._commit_reactive(event.value, report=True)
 
     @on(Select.Changed, "#brightness")
     def _brightness_changed(self, event):

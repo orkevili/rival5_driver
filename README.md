@@ -33,7 +33,10 @@ Run `rival5` to open the TUI.
 | `Enter` | Edit the selected item |
 | `+` `-` `a` `d` | On the CPI tab: step, add, remove |
 | `s` | Save to the config and the mouse |
+| `Ctrl+S` | Save, also from inside a text field |
 | `q` | Quit |
+
+Colors can be hex (`#00aaff`, `0af`), CSS names (`orange`, `hotpink`), `rgb(0,170,255)` or `hsl(200,100%,50%)`. LEDs don't match a screen exactly, so a color may look different on the mouse. `orange` and `pink` are adjusted for the LEDs; a hex value is always sent as written.
 
 Colors change on the mouse as you pick them, as a preview. Everything else waits for `s`, and tabs with unsaved changes show `●`. If you quit and discard, the saved colors are put back.
 
@@ -41,7 +44,7 @@ The same settings are available as commands:
 
 ```sh
 rival5 color all '#00aaff'        # zones: all left right logo wheel z2-z9
-rival5 color wheel red
+rival5 color wheel orange
 rival5 rainbow
 rival5 cpi 400 800 1600           # 1-5 presets, 100-18000
 rival5 poll 1000                  # 125 250 500 1000
@@ -51,6 +54,7 @@ rival5 unbind button4             # or: unbind --all
 rival5 apply                      # send the whole config, after editing it by hand
 rival5 show                       # print the config
 rival5 reset                      # factory defaults, clears the config
+rival5 --version                  # print the version
 ```
 
 To try a change without keeping it, add `--no-save` before the command. It leaves the config and onboard memory alone, so a replug undoes it:

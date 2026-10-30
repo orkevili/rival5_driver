@@ -10,12 +10,17 @@ from rivalcfg.color_helpers import is_color, parse_color_string
 from rivalcfg.devices.rival5 import profile
 from rivalcfg.handlers.buttons import layout_multimedia, layout_qwerty
 from rivalcfg.handlers.buttons.buttons import build_layout
+from textual.color import Color, ColorParseError
 
 MAX_PRESETS = 5
 MIN_CPI, MAX_CPI, CPI_STEP = profile["settings"]["sensitivity"]["input_range"]
 POLLING_RATES = list(profile["settings"]["polling_rate"]["choices"])
 BRIGHTNESS_LEVELS = list(profile["settings"]["led_brightness"]["choices"])
 STARTUP_MODES = list(profile["settings"]["default_lighting"]["choices"])
+REACTIVE_OFF = ("off", "disable")
+
+# Green LEDs are strong, so these names wash out when sent as their CSS values.
+LED_COLORS = {"orange": "#ff4500", "pink": "#ff2850"}
 
 LEFT_STRIP = ["z2", "z4", "z6", "z8"]
 RIGHT_STRIP = ["z3", "z5", "z7", "z9"]
@@ -81,13 +86,11 @@ def validate(cfg, force=False):
         raise ValueError(f"Brightness must be one of {BRIGHTNESS_LEVELS}")
     if cfg.startup not in STARTUP_MODES:
         raise ValueError(f"Startup lighting must be one of {STARTUP_MODES}")
-    if cfg.reactive.lower() not in ("off", "disable") and not is_color(cfg.reactive):
-        raise ValueError(f"Not a color: {cfg.reactive}")
+    check_reactive(cfg.reactive)
     for zone, color in cfg.zones.items():
         if zone not in ZONES:
             raise ValueError(f"Unknown zone: {zone}")
-        if not is_color(color):
-            raise ValueError(f"Not a color: {color}")
+        parse_color(color)
     for button, action in cfg.buttons.items():
         if button not in BUTTON_DEFAULTS:
             raise ValueError(f"Unknown button: {button}")
@@ -107,8 +110,7 @@ def set_zone(cfg, zone, color):
     zone = ZONE_ALIASES.get(zone, zone)
     if zone not in ZONES:
         raise ValueError(f"Unknown zone: {zone}")
-    if not is_color(color):
-        raise ValueError(f"Not a color: {color}")
+    parse_color(color)
     covered = set(ZONES[zone])
     cfg.zones = {
         name: value
@@ -128,9 +130,34 @@ def resolve_zones(zones):
     return leds
 
 
+def parse_color(text):
+    """Return (red, green, blue) for hex, a CSS color name, rgb() or hsl()."""
+    if is_color(text):
+        return parse_color_string(text)
+    try:
+        color = Color.parse(text.strip().lower())
+    except ColorParseError as error:
+        raise ValueError(f"Not a color: {text}") from error
+    # Color.parse also takes things an LED can't show, like "ansi_red".
+    if color.a != 1 or color.ansi is not None or color.auto:
+        raise ValueError(f"Not a color: {text}")
+    return color.rgb
+
+
+def check_reactive(value):
+    """Raise ValueError unless value is off or a color."""
+    if value.lower() not in REACTIVE_OFF:
+        parse_color(value)
+
+
 def color_hex(color):
-    red, green, blue = parse_color_string(color)
+    red, green, blue = parse_color(color)
     return f"#{red:02x}{green:02x}{blue:02x}"
+
+
+def led_hex(color):
+    """Return the hex to send to the mouse, which can differ from the screen."""
+    return LED_COLORS.get(color.strip().lower()) or color_hex(color)
 
 
 def bind(cfg, button, action):

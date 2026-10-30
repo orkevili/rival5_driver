@@ -3,12 +3,15 @@
 import argparse
 import sys
 
-from . import config, device
+from . import __version__, config, device
 
 
 def _parser():
     parser = argparse.ArgumentParser(
         prog="rival5", description="Configure a SteelSeries Rival 5."
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"rival5 {__version__}"
     )
     parser.add_argument(
         "--no-save",
@@ -19,7 +22,7 @@ def _parser():
 
     command = commands.add_parser("color", help="set LED colors")
     command.add_argument("zone", help="all, left, right, logo, wheel or z0-z9")
-    command.add_argument("color", help="#00aaff, 0af or a name like red")
+    command.add_argument("color", help="#00aaff, 0af, rgb(0,170,255) or a name like orange")
 
     commands.add_parser("rainbow", help="rainbow effect")
 

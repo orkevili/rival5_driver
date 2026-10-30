@@ -119,3 +119,49 @@ def test_set_zone_alias_and_clears_rainbow():
 def test_color_hex():
     assert config.color_hex("red") == "#ff0000"
     assert config.color_hex("#0AF") == "#00aaff"
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("orange", (255, 165, 0)),
+        ("Orange", (255, 165, 0)),
+        ("hotpink", (255, 105, 180)),
+        ("rgb(1,2,3)", (1, 2, 3)),
+        ("hsl(30,100%,50%)", (255, 128, 0)),
+        ("0af", (0, 170, 255)),
+        ("#00aaff", (0, 170, 255)),
+        ("green", (0, 128, 0)),
+    ],
+)
+def test_parse_color(text, expected):
+    assert config.parse_color(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["ansi_red", "transparent", "auto", "red 50%", "rgba(1,2,3,0.5)", "nope", ""],
+)
+def test_parse_color_rejects_what_an_led_cannot_show(text):
+    with pytest.raises(ValueError):
+        config.parse_color(text)
+
+
+def test_named_color_stays_as_typed_in_the_file():
+    cfg = Config()
+    config.set_zone(cfg, "all", "orange")
+    config.save(cfg)
+    assert config.load().zones == {"all": "orange"}
+
+
+@pytest.mark.parametrize("value", ["off", "OFF", "disable", "orange"])
+def test_reactive_accepts(value):
+    config.check_reactive(value)
+
+
+def test_led_colors_differ_from_the_screen_only_for_tuned_names():
+    assert config.color_hex("orange") == "#ffa500"
+    assert config.led_hex("Orange") == "#ff4500"
+    assert config.led_hex("pink") == "#ff2850"
+    assert config.led_hex("#ffa500") == "#ffa500"
+    assert config.led_hex("hotpink") == "#ff69b4"

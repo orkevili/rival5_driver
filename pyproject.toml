@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rival5"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Configure a SteelSeries Rival 5 on Linux from a terminal UI"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,6 +15,9 @@ dev = ["pytest", "pytest-asyncio"]
 
 [project.scripts]
 rival5 = "rival5.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "rival5.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

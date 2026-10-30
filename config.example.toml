@@ -15,7 +15,8 @@ reactive = "off"                  # off, or a color to flash on click
 rainbow = false                   # true ignores [lighting.zones]
 
 [lighting.zones]                  # all, left, right, logo, wheel, z2-z9
-all = "#00aaff"                   # narrower zones win over broader ones
+all = "#00aaff"                   # hex, a CSS name like "orange", rgb() or hsl()
+                                  # narrower zones win over broader ones
 wheel = "red"
 
 [buttons]                         # only overrides: unlisted buttons keep defaults

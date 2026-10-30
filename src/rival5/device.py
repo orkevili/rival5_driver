@@ -76,7 +76,14 @@ def send_lighting(mouse, cfg):
         return
     for led, color in config.resolve_zones(cfg.zones).items():
         setting = _LED_SETTINGS.get(led, f"{led}_color")
-        getattr(mouse, f"set_{setting}")(color)
+        getattr(mouse, f"set_{setting}")(config.led_hex(color))
+
+
+def send_reactive(mouse, cfg):
+    reactive = cfg.reactive
+    if reactive.lower() not in config.REACTIVE_OFF:
+        reactive = config.led_hex(reactive)
+    mouse.set_reactive_color(reactive)
 
 
 def apply(mouse, cfg, previous=None, save=True):
@@ -101,7 +108,7 @@ def apply(mouse, cfg, previous=None, save=True):
     if changed("brightness"):
         mouse.set_led_brightness(cfg.brightness)
     if changed("reactive"):
-        mouse.set_reactive_color(cfg.reactive)
+        send_reactive(mouse, cfg)
     if save:
         mouse.save()
     if changed("zones", "rainbow"):
@@ -111,7 +118,7 @@ def apply(mouse, cfg, previous=None, save=True):
 def restore(mouse, cfg):
     """Re-send what the mouse forgets. Never touches CPI."""
     mouse.set_led_brightness(cfg.brightness)
-    mouse.set_reactive_color(cfg.reactive)
+    send_reactive(mouse, cfg)
     send_lighting(mouse, cfg)
 
 

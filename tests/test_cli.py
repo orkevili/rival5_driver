@@ -1,6 +1,6 @@
 import pytest
 
-from rival5 import cli, config, device
+from rival5 import __version__, cli, config, device
 
 
 @pytest.fixture
@@ -117,3 +117,10 @@ def test_reset_clears_config(fake):
 def test_show_says_it_is_the_config(capsys):
     assert cli.main(["show"]) == 0
     assert "can't be read back" in capsys.readouterr().out
+
+
+def test_version(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["--version"])
+    assert exit_info.value.code == 0
+    assert capsys.readouterr().out == f"rival5 {__version__}\n"

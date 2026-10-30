@@ -1,7 +1,7 @@
 import pytest
 from textual.widgets import Input, Select, Static
 
-from rival5 import config, device
+from rival5 import __version__, config, device
 from rival5.config import Config
 from rival5.tui import ButtonPicker, ConfirmScreen, Rival5App
 
@@ -221,7 +221,7 @@ async def test_discard_puts_previewed_colors_back(mouse):
         await pilot.pause()
         await pilot.click("#discard")
         await settle(app, pilot)
-        assert ("set_logo_color", "blue") in mouse.calls
+        assert ("set_logo_color", "#0000ff") in mouse.calls
 
 
 async def test_no_mouse_still_edits_config():
@@ -276,3 +276,78 @@ def test_list_of_zones_matches_config():
     from rival5.tui import ZONE_LABELS
 
     assert set(ZONE_LABELS) == set(config.ZONES)
+
+
+async def test_header_shows_version(mouse):
+    app = make_app(mouse)
+    async with app.run_test(size=(90, 30)):
+        assert __version__ in str(app.query_one("#title", Static).render())
+
+
+async def test_css_color_name_previews_as_hex(mouse):
+    app = make_app(mouse)
+    async with app.run_test(size=(90, 30)) as pilot:
+        app.query_one("#color", Input).focus()
+        await pilot.press(*"orange", "enter")
+        await settle(app, pilot)
+        assert ("set_logo_color", "#ff4500") in mouse.calls
+        assert app.cfg.zones == {"all": "orange"}
+
+
+async def type_reactive(app, pilot, text):
+    field = app.query_one("#reactive", Input)
+    field.focus()
+    field.value = ""
+    await pilot.press(*text)
+
+
+async def test_reactive_typed_then_tab_then_s_saves(mouse):
+    config.save(Config(reactive="white"))
+    app = make_app(mouse)
+    async with app.run_test(size=(90, 30)) as pilot:
+        await type_reactive(app, pilot, "off")
+        await pilot.press("tab", "s")
+        await settle(app, pilot)
+        assert config.load().reactive == "off"
+        assert ("set_reactive_color", "off") in mouse.calls
+
+
+async def test_half_typed_reactive_is_quiet_and_keeps_the_old_value(mouse):
+    config.save(Config(reactive="white"))
+    app = make_app(mouse)
+    async with app.run_test(size=(90, 30)) as pilot:
+        await type_reactive(app, pilot, "of")
+        assert app.cfg.reactive == "white"
+        assert not app._notifications
+
+
+async def test_invalid_reactive_reports_when_leaving_the_field(mouse):
+    config.save(Config(reactive="white"))
+    app = make_app(mouse)
+    async with app.run_test(size=(90, 30)) as pilot:
+        await type_reactive(app, pilot, "nope")
+        await pilot.press("tab")
+        assert app.cfg.reactive == "white"
+        assert app._notifications
+
+
+async def test_ctrl_s_saves_from_inside_a_field(mouse):
+    config.save(Config(reactive="white"))
+    app = make_app(mouse)
+    async with app.run_test(size=(90, 30)) as pilot:
+        await type_reactive(app, pilot, "off")
+        await pilot.press("ctrl+s")
+        await settle(app, pilot)
+        assert config.load().reactive == "off"
+        assert app.query_one("#reactive", Input).value == "off"
+
+
+async def test_ctrl_s_does_nothing_behind_a_dialog(mouse):
+    app = make_app(mouse)
+    async with app.run_test(size=(90, 30)) as pilot:
+        await pilot.press("right")
+        await pilot.press("plus", "q")
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.press("ctrl+s")
+        await settle(app, pilot)
+        assert not config.default_path().exists()

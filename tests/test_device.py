@@ -108,3 +108,18 @@ def test_real_rivalcfg_encodes_a_full_config():
     assert bytes([0x51, 0x68]) in written  # F13
     assert bytes([0x61, 0xCD]) in written  # PlayPause
     assert bytes([0x11, 0x00]) in written  # save
+
+
+def test_named_colors_reach_rivalcfg_as_hex(mouse):
+    cfg = Config(zones={"logo": "orange"}, reactive="hotpink")
+    device.send_lighting(mouse, cfg)
+    device.send_reactive(mouse, cfg)
+    assert mouse.calls == [
+        ("set_logo_color", "#ff4500"),
+        ("set_reactive_color", "#ff69b4"),
+    ]
+
+
+def test_reactive_off_is_sent_as_off(mouse):
+    device.send_reactive(mouse, Config(reactive="off"))
+    assert mouse.calls == [("set_reactive_color", "off")]

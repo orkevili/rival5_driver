@@ -123,3 +123,15 @@ def test_named_colors_reach_rivalcfg_as_hex(mouse):
 def test_reactive_off_is_sent_as_off(mouse):
     device.send_reactive(mouse, Config(reactive="off"))
     assert mouse.calls == [("set_reactive_color", "off")]
+
+
+def test_send_lighting_skips_leds_already_showing_the_color(mouse):
+    first = Config(zones={"all": "red"})
+    last_sent = device.send_lighting(mouse, first)
+    mouse.calls.clear()
+    device.send_lighting(mouse, Config(zones={"all": "red", "logo": "blue"}), last_sent)
+    assert mouse.calls == [("set_logo_color", "#0000ff")]
+
+
+def test_rainbow_means_nothing_can_be_skipped(mouse):
+    assert device.send_lighting(mouse, Config(rainbow=True)) is None

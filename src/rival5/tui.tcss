@@ -61,8 +61,27 @@ OptionList:focus {
 }
 
 #color {
-    width: 24;
+    width: 18;
     margin-right: 2;
+}
+
+#rainbow {
+    min-width: 11;
+    width: 11;
+}
+
+.pick {
+    min-width: 9;
+    width: 9;
+    margin-right: 2;
+}
+
+#reactive-row {
+    height: 3;
+}
+
+#reactive {
+    width: 17;
 }
 
 #swatches {
@@ -86,7 +105,7 @@ OptionList:focus {
 
 #lighting-grid, #device-grid {
     grid-size: 2;
-    grid-columns: 14 26;
+    grid-columns: 14 28;
     grid-rows: 3;
     height: auto;
 }
@@ -104,7 +123,7 @@ OptionList:focus {
     margin-right: 2;
 }
 
-ConfirmScreen, ButtonPicker {
+ConfirmScreen, ButtonPicker, ColorPicker {
     align: center middle;
 }
 
@@ -128,6 +147,35 @@ ConfirmScreen, ButtonPicker {
 .picker {
     width: 44;
     height: 80%;
+}
+
+.color-dialog {
+    width: 40;
+}
+
+ColorField {
+    width: 34;
+    height: 10;
+    margin-top: 1;
+}
+
+HueBar {
+    width: 34;
+    height: 1;
+    margin-top: 1;
+}
+
+#picked {
+    height: 1;
+}
+
+#picker-hint {
+    color: $text-muted;
+}
+
+.color-dialog Button {
+    min-width: 14;
+    width: 14;
 }
 
 #actions {

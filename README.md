@@ -31,6 +31,7 @@ Run `rival5` to open the TUI.
 | `↑` `↓` | Move in a list |
 | `Tab` | Next field |
 | `Enter` | Edit the selected item |
+| `p` | On the Lighting tab: pick a color for the selected zone |
 | `+` `-` `a` `d` | On the CPI tab: step, add, remove |
 | `s` | Save to the config and the mouse |
 | `Ctrl+S` | Save, also from inside a text field |
@@ -38,7 +39,9 @@ Run `rival5` to open the TUI.
 
 Colors can be hex (`#00aaff`, `0af`), CSS names (`orange`, `hotpink`), `rgb(0,170,255)` or `hsl(200,100%,50%)`. LEDs don't match a screen exactly, so a color may look different on the mouse. `orange` and `pink` are adjusted for the LEDs; a hex value is always sent as written.
 
-Colors change on the mouse as you pick them, as a preview. Everything else waits for `s`, and tabs with unsaved changes show `●`. If you quit and discard, the saved colors are put back.
+In the color picker, use the mouse or the arrow keys, change the hue with `,` and `.`, then press `Enter` to use the color or `Esc` to go back. The `Pick…` button next to Reactive opens it for the reactive color. Screens and LEDs differ, so pale and mixed colors look paler on the mouse than in the picker.
+
+Colors change on the mouse as you pick them, as a preview. Pressing `Enter` on a reactive color also sends it, and it shows on the next click. Everything else waits for `s`, and tabs with unsaved changes show `●`. If you quit and discard, the saved colors and reactive color are put back.
 
 The same settings are available as commands:
 

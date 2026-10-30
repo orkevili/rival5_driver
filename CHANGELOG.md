@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- Add a color picker for zones and the reactive color, with mouse and keyboard control and a live preview.
+- Preview the reactive color on Enter. Discarding puts the saved one back.
+- Fast previews no longer pile up or finish out of order: only the newest is sent, and only for LEDs that changed.
+
 ## 0.2.0
 
 - Show the version in the TUI header and with `rival5 --version`.

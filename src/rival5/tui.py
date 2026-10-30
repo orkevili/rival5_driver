@@ -2,6 +2,7 @@
 
 import copy
 import threading
+from dataclasses import replace
 
 from rich.text import Text
 from textual import on
@@ -23,6 +24,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 from . import __version__, config, device
+from .colorpicker import ColorPicker
 
 TABS = ["lighting", "cpi", "buttons", "device"]
 TAB_LABELS = {
@@ -58,6 +60,7 @@ ZONE_LABELS = {
     "z7": "Right lower middle",
     "z9": "Right bottom",
 }
+MOUSE_ERRORS = (device.DeviceError, OSError, ValueError)
 HINT = "←/→ tabs   ↑/↓ move   tab next field   enter edit   ctrl+s save"
 SWATCHES = [
     "red",
@@ -192,6 +195,7 @@ class Rival5App(App):
     BINDINGS = [
         Binding("left", "tab(-1)", "Prev tab", show=False),
         Binding("right", "tab(1)", "Next tab", show=False),
+        Binding("p", "pick", "Pick color"),
         Binding("s", "save", "Save"),
         Binding("ctrl+s", "save", "Save", show=False, priority=True),
         Binding("q", "quit", "Quit"),
@@ -205,12 +209,17 @@ class Rival5App(App):
         self.cfg = None
         self.load_error = None
         self.io_lock = threading.Lock()
+        self.preview_lock = threading.Lock()
+        self.next_preview = None
+        self.previewing = False
+        self.last_leds = None
         try:
             self.saved = config.load()
         except ValueError as error:
             self.load_error = str(error)
             self.saved = config.Config()
         self.cfg = copy.deepcopy(self.saved)
+        self.mouse_reactive = self.saved.reactive
 
     @property
     def dirty(self):
@@ -227,6 +236,7 @@ class Rival5App(App):
                     with Vertical(id="lighting-controls"):
                         with Horizontal(id="color-row"):
                             yield Input(placeholder="#00aaff or red", id="color")
+                            yield Button("Pick…", id="pick-color", classes="pick")
                             yield Button("Rainbow", id="rainbow")
                         with Horizontal(id="swatches"):
                             for name in SWATCHES:
@@ -242,11 +252,15 @@ class Rival5App(App):
                                 id="brightness",
                             )
                             yield Label("Reactive")
-                            yield Input(
-                                value=self.cfg.reactive,
-                                placeholder="off or a color",
-                                id="reactive",
-                            )
+                            with Horizontal(id="reactive-row"):
+                                yield Input(
+                                    value=self.cfg.reactive,
+                                    placeholder="off or a color",
+                                    id="reactive",
+                                )
+                                yield Button(
+                                    "Pick…", id="pick-reactive", classes="pick"
+                                )
                             yield Label("On startup")
                             yield Select(
                                 [(mode, mode) for mode in config.STARTUP_MODES],
@@ -381,6 +395,11 @@ class Rival5App(App):
         name = event.pane.id.removesuffix("-tab")
         self.query_one(TAB_FOCUS[name]).focus()
 
+    def check_action(self, action, parameters):
+        if action == "pick":
+            return self.query_one("#tabs", TabbedContent).active == "lighting"
+        return True
+
     def action_save(self):
         # Ctrl+S is a priority binding, so it also fires behind a dialog.
         if isinstance(self.screen, ModalScreen):
@@ -396,10 +415,12 @@ class Rival5App(App):
         except ValueError as error:
             self.notify(str(error), severity="error")
             return
-        previous = self.saved
+        # A previewed reactive color may differ from what was last saved.
+        previous = replace(self.saved, reactive=self.mouse_reactive)
         cfg = copy.deepcopy(self.cfg)
         config.save(cfg)
         self.saved = copy.deepcopy(cfg)
+        self.mouse_reactive = cfg.reactive
         self.refresh_buttons()
         self.refresh_pending()
         self._with_mouse(
@@ -428,18 +449,22 @@ class Rival5App(App):
             self._discard()
 
     def _discard(self):
-        changed = (self.cfg.zones, self.cfg.rainbow) != (
-            self.saved.zones,
-            self.saved.rainbow,
+        changed = (
+            self.cfg.zones != self.saved.zones
+            or self.cfg.rainbow != self.saved.rainbow
+            or self.mouse_reactive != self.saved.reactive
         )
         if not changed:
             self.exit()
             return
         # Colors were previewed live, so put the saved ones back.
         saved = copy.deepcopy(self.saved)
-        self._with_mouse(
-            lambda mouse: device.send_lighting(mouse, saved), then_exit=True
-        )
+
+        def restore(mouse):
+            device.send_lighting(mouse, saved)
+            device.send_reactive(mouse, saved)
+
+        self._with_mouse(restore, then_exit=True)
 
     def _with_mouse(self, job, success=None, failure=None, then_exit=False):
         """Run job in a thread: writes pause between commands."""
@@ -447,10 +472,11 @@ class Rival5App(App):
         def run():
             error = None
             with self.io_lock:
+                self.last_leds = None
                 try:
                     with self.opener() as mouse:
                         job(mouse)
-                except (device.DeviceError, OSError, ValueError) as caught:
+                except MOUSE_ERRORS as caught:
                     error = str(caught)
             if error:
                 text = f"{failure}: {error}" if failure else error
@@ -463,10 +489,36 @@ class Rival5App(App):
         self.run_worker(run, thread=True, exit_on_error=False)
 
     def _preview(self):
-        cfg = copy.deepcopy(self.cfg)
         self.refresh_zones()
         self.refresh_pending()
-        self._with_mouse(lambda mouse: device.send_lighting(mouse, cfg))
+        with self.preview_lock:
+            self.next_preview = copy.deepcopy(self.cfg)
+            if self.previewing:
+                return
+            self.previewing = True
+        self.run_worker(self._send_previews, thread=True, exit_on_error=False)
+
+    def _take_preview(self):
+        with self.preview_lock:
+            cfg, self.next_preview = self.next_preview, None
+            self.previewing = cfg is not None
+        return cfg
+
+    def _send_previews(self):
+        """Latest wins: a color replaced while waiting is never sent."""
+        try:
+            with self.io_lock, self.opener() as mouse:
+                while cfg := self._take_preview():
+                    self.last_leds = device.send_lighting(mouse, cfg, self.last_leds)
+                    if cfg.reactive != self.mouse_reactive:
+                        device.send_reactive(mouse, cfg)
+                        self.mouse_reactive = cfg.reactive
+        except MOUSE_ERRORS as error:
+            with self.preview_lock:
+                self.next_preview = None
+                self.previewing = False
+            self.last_leds = None
+            self.call_from_thread(self.notify, str(error), severity="error")
 
     # Lighting
 
@@ -482,6 +534,43 @@ class Rival5App(App):
             return
         self.query_one("#color", Input).value = color
         self._preview()
+
+    def action_pick(self):
+        zone = self._selected_zone()
+        before = copy.deepcopy(self.cfg)
+        field = self.query_one("#color", Input)
+        typed = field.value
+
+        def finished(color):
+            if color is None:
+                self.cfg = before
+                field.value = typed
+                self._preview()
+
+        self.push_screen(
+            ColorPicker(
+                f"Color for {ZONE_LABELS[zone]}",
+                self._zone_color(zone) or "red",
+                self._set_color,
+            ),
+            finished,
+        )
+
+    def _pick_reactive(self):
+        field = self.query_one("#reactive", Input)
+        before = self.cfg.reactive
+        start = "white" if before.lower() in config.REACTIVE_OFF else before
+
+        def change(color):
+            field.value = color
+            self._commit_reactive(color, report=False)
+            self._preview()
+
+        def finished(color):
+            if color is None:
+                change(before)
+
+        self.push_screen(ColorPicker("Reactive color", start, change), finished)
 
     @on(OptionList.OptionHighlighted, "#zones")
     def _zone_highlighted(self, event):
@@ -503,9 +592,10 @@ class Rival5App(App):
         except ValueError as error:
             if report:
                 self.notify(str(error), severity="error")
-            return
+            return False
         self.cfg.reactive = value
         self.refresh_pending()
+        return True
 
     @on(Input.Changed, "#reactive")
     def _reactive_changed(self, event):
@@ -513,9 +603,13 @@ class Rival5App(App):
         self._commit_reactive(event.value, report=False)
 
     @on(Input.Blurred, "#reactive")
-    @on(Input.Submitted, "#reactive")
-    def _reactive_finished(self, event):
+    def _reactive_left(self, event):
         self._commit_reactive(event.value, report=True)
+
+    @on(Input.Submitted, "#reactive")
+    def _reactive_submitted(self, event):
+        if self._commit_reactive(event.value, report=True):
+            self._preview()
 
     @on(Select.Changed, "#brightness")
     def _brightness_changed(self, event):
@@ -600,6 +694,10 @@ class Rival5App(App):
                 self.cpi_add()
             case "cpi-remove":
                 self.cpi_remove()
+            case "pick-color":
+                self.action_pick()
+            case "pick-reactive":
+                self._pick_reactive()
             case "rainbow":
                 self.cfg.rainbow = True
                 self._preview()
@@ -628,6 +726,7 @@ class Rival5App(App):
         config.default_path().unlink(missing_ok=True)
         self.saved = config.Config()
         self.cfg = config.Config()
+        self.mouse_reactive = self.saved.reactive
         self.refresh_all()
         self._with_mouse(device.reset, success="Reset to factory defaults")
 

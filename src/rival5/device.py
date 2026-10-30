@@ -70,13 +70,23 @@ def send_buttons(mouse, cfg):
     mouse.set_buttons_mapping({"buttons": dict(cfg.buttons)})
 
 
-def send_lighting(mouse, cfg):
+def send_lighting(mouse, cfg, last_sent=None):
+    """Send the colors, skipping LEDs that already show them.
+
+    Each write takes a while, so a preview only sends what changed. Returns
+    what to pass as last_sent next time; rainbow means nothing can be skipped.
+    """
     if cfg.rainbow:
         mouse.set_rainbow_effect()
-        return
+        return None
+    showing = dict(last_sent or {})
     for led, color in config.resolve_zones(cfg.zones).items():
-        setting = _LED_SETTINGS.get(led, f"{led}_color")
-        getattr(mouse, f"set_{setting}")(config.led_hex(color))
+        color = config.led_hex(color)
+        if showing.get(led) != color:
+            setting = _LED_SETTINGS.get(led, f"{led}_color")
+            getattr(mouse, f"set_{setting}")(color)
+            showing[led] = color
+    return showing
 
 
 def send_reactive(mouse, cfg):
